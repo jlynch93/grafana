@@ -27,6 +27,7 @@ import (
 var ExtraGithubSettingKeys = map[string]ExtraKeyInfo{
 	allowedOrganizationsKey: {Type: String},
 	teamIdsKey:              {Type: String},
+	allowedEmailDomainsKey:  {Type: String},
 }
 
 var _ social.SocialConnector = (*SocialGithub)(nil)
@@ -218,11 +219,41 @@ func (s *SocialGithub) fetchPrivateEmail(ctx context.Context, client *http.Clien
 		return "", fmt.Errorf("Error getting email address: %s", err)
 	}
 
+	// Get allowed email domains from config (comma-separated, e.g., "@example.com,@company.org")
+	allowedDomainsStr := s.info.Extra[allowedEmailDomainsKey]
+	var allowedDomains []string
+	if allowedDomainsStr != "" {
+		allowedDomains = strings.Split(allowedDomainsStr, ",")
+		for i := range allowedDomains {
+			allowedDomains[i] = strings.TrimSpace(allowedDomains[i])
+		}
+	}
+
 	var email = ""
+	var primaryEmail = ""
+
 	for _, record := range records {
 		if record.Primary {
-			email = record.Email
+			primaryEmail = record.Email
 		}
+
+		// If we have allowed domains, search for verified emails matching them
+		if len(allowedDomains) > 0 && record.Verified {
+			for _, domain := range allowedDomains {
+				if strings.HasSuffix(record.Email, domain) {
+					email = record.Email
+					break
+				}
+			}
+			if email != "" {
+				break
+			}
+		}
+	}
+
+	// Fall back to primary if no domain match found
+	if email == "" {
+		email = primaryEmail
 	}
 
 	return email, nil
